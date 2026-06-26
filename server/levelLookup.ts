@@ -44,6 +44,7 @@ type CachedScanResult = Omit<ScanResult, "files"> & {
 
 type MonsterInfo = {
   monster_id: number;
+  model_id: number | null;
   type: number;
   type_name: string;
   name_id: number | null;
@@ -53,11 +54,13 @@ type MonsterInfo = {
   raw_description: string;
   description: string;
   model_name: string;
+  frame_resource: string;
   waves: Array<{ wave: number | null; wave_type: number | null; count: number | null }>;
   total_count: number;
 };
 
 type LevelRecord = {
+  stage_key: string;
   stage_no: number;
   level_id: number;
   level_label: string;
@@ -176,7 +179,7 @@ const REQUIRED_FILES: Array<{ key: RequiredFileKey; label: string; fileName: str
 
 const settingsPath = path.resolve(process.cwd(), ".local", "level-info-settings.json");
 const cachePath = path.resolve(process.cwd(), ".local", "level-info-cache.json");
-const cacheVersion = 5;
+const cacheVersion = 8;
 const tagPattern = /<[^>]+>/g;
 const partNameById = new Map<number, string>([
   [1, "头盔"],
@@ -226,7 +229,8 @@ export async function scanLevelLookup(rootPath: string): Promise<ScanResult> {
   const skillWorkbook = await readWorkbook(foundWithStats.get("skill")!.absolutePath);
   const entryWorkbook = await readWorkbook(foundWithStats.get("entry")!.absolutePath);
   const textMap = buildTextMap(textWorkbook);
-  const monsterMap = buildMonsterMap(monsterWorkbook, textMap);
+  const monsterFrameMap = await buildMonsterFrameMap(normalizedRoot);
+  const monsterMap = buildMonsterMap(monsterWorkbook, textMap, monsterFrameMap);
   const levelMonsters = buildLevelMonsters(spawnWorkbook, monsterMap);
 
   const result: ScanResult = {
@@ -267,7 +271,7 @@ export async function saveSavedRootPath(rootPath: string, clientRootPath = ""): 
   await fs.writeFile(settingsPath, `${JSON.stringify({ rootPath: normalizedRoot, clientRootPath: normalizedClientRoot }, null, 2)}\n`, "utf-8");
 }
 
-export async function readClientImage(clientRootPath: string, resourceName: string): Promise<Buffer | null> {
+export async function readClientImage(clientRootPath: string, resourceName: string, kind = "skin"): Promise<Buffer | null> {
   const rootText = clientRootPath.trim().replace(/^"+|"+$/g, "");
   const safeName = path.basename(resourceName.trim()).replace(/\.png$/i, "");
   if (!rootText || !safeName) return null;
@@ -279,6 +283,20 @@ export async function readClientImage(clientRootPath: string, resourceName: stri
   const assetRoot = path.basename(root).toLowerCase() === "assets" ? root : path.join(root, "Assets");
   const assetStat = await fs.stat(assetRoot).catch(() => null);
   if (!assetStat?.isDirectory()) return null;
+
+  if (kind === "monster") {
+    const monsterRoot = path.resolve(assetRoot, "ActorModel", "Monster", safeName);
+    if (!monsterRoot.startsWith(assetRoot + path.sep)) return null;
+    const idleDir = path.join(monsterRoot, "idle");
+    const files = await fs.readdir(idleDir).catch(() => []);
+    const idleImage = files.filter((file) => /\.png$/i.test(file)).sort((left, right) => left.localeCompare(right, "en")).at(0);
+    if (idleImage) {
+      const imagePath = path.resolve(idleDir, idleImage);
+      if (!imagePath.startsWith(idleDir + path.sep)) return null;
+      return (await fs.readFile(imagePath).catch(() => null)) ?? null;
+    }
+    return null;
+  }
 
   const subdirs = ["UIRaw/Icon_Skin", "UIRaw/Icon_HeXin", "UIRaw/Icon_Wall", "Resources/Textures/WallIcon", "UIRaw/Icon_Skill"];
   for (const subdir of subdirs) {
@@ -333,6 +351,7 @@ async function readCachedScan(rootPath: string): Promise<CachedScanResult | null
     if (!cached.skinLookup?.wall || !cached.skinLookup?.wallChroma) return null;
     if (cached.skinLookup.personChroma?.some((record) => typeof record.prerequisite_skins?.[0] === "string")) return null;
     if (cached.skinLookup.person?.some((record) => !Array.isArray(record.image_assets))) return null;
+    if (Object.values(cached.lookup.byLevelId).some((record) => !record.stage_key)) return null;
     return cached;
   } catch {
     return null;
@@ -436,6 +455,23 @@ function buildTextMap(workbook: XLSX.WorkBook): Map<number, string> {
     }
   }
   return textMap;
+}
+
+async function buildMonsterFrameMap(rootPath: string): Promise<Map<number, string>> {
+  const csvPath = path.join(rootPath, "csv", "怪物模型配置表.csv");
+  const content = await fs.readFile(csvPath, "utf-8").catch(() => null);
+  if (!content) return new Map();
+
+  const workbook = XLSX.read(content, { type: "string" });
+  const rows = getSheetRows(workbook, workbook.SheetNames[0] ?? "");
+  const index = headerIndex(rows);
+  const frameMap = new Map<number, string>();
+  for (const row of rows.slice(1)) {
+    const modelId = normalizeId(row[index["模型ID"]]);
+    const frameResource = toText(row[index["帧动画配置文件"]]);
+    if (typeof modelId === "number" && frameResource) frameMap.set(modelId, frameResource);
+  }
+  return frameMap;
 }
 
 function asNumberValue(value: CellValue): number {
@@ -771,7 +807,7 @@ function buildSkinLookupData(skinWorkbook: XLSX.WorkBook, skillWorkbook: XLSX.Wo
   return result;
 }
 
-function buildMonsterMap(workbook: XLSX.WorkBook, textMap: Map<number, string>) {
+function buildMonsterMap(workbook: XLSX.WorkBook, textMap: Map<number, string>, monsterFrameMap = new Map<number, string>()) {
   const rows = getSheetRows(workbook, "怪物配置表");
   const index = headerIndex(rows);
   const monsterMap = new Map<number, Omit<MonsterInfo, "waves" | "total_count">>();
@@ -779,6 +815,7 @@ function buildMonsterMap(workbook: XLSX.WorkBook, textMap: Map<number, string>) 
   for (const row of rows.slice(1)) {
     const monsterId = normalizeId(row[index["ID"]]);
     if (typeof monsterId !== "number") continue;
+    const modelId = normalizeId(row[index["模型ID"]]);
     const nameId = normalizeId(row[index["怪物名称ID"]]);
     const descriptionId = normalizeId(row[index["怪物描述ID"]]);
     const type = normalizeId(row[index["类型"]]);
@@ -786,6 +823,7 @@ function buildMonsterMap(workbook: XLSX.WorkBook, textMap: Map<number, string>) 
     const rawDescription = (typeof descriptionId === "number" ? textMap.get(descriptionId) : "") || toText(row[index["怪物描述"]]);
     monsterMap.set(monsterId, {
       monster_id: monsterId,
+      model_id: typeof modelId === "number" ? modelId : null,
       type: typeof type === "number" ? type : 0,
       type_name: type === 1 ? "小怪" : type === 6 ? "精英怪" : type === 2 ? "首领" : String(type ?? ""),
       name_id: typeof nameId === "number" ? nameId : null,
@@ -795,6 +833,7 @@ function buildMonsterMap(workbook: XLSX.WorkBook, textMap: Map<number, string>) 
       raw_description: rawDescription,
       description: stripRichText(rawDescription),
       model_name: toText(row[index["模型名称"]]),
+      frame_resource: typeof modelId === "number" ? monsterFrameMap.get(modelId) ?? "" : "",
     });
   }
 
@@ -835,12 +874,12 @@ function asNumber(value: number | string | null): number | null {
   return typeof value === "number" ? value : null;
 }
 
-function extractStageNumber(...values: string[]): number | null {
+function extractStageKey(...values: string[]): string | null {
   for (const value of values) {
-    const stageMatch = value.match(/第\s*(\d+)\s*关/);
-    if (stageMatch) return Number(stageMatch[1]);
-    const prefixMatch = value.match(/^\s*(\d+)\s*[.。．、-]/);
-    if (prefixMatch) return Number(prefixMatch[1]);
+    const stageMatch = value.match(/第\s*(\d+(?:-\d+)?)\s*关/);
+    if (stageMatch) return stageMatch[1];
+    const prefixMatch = value.match(/^\s*(\d+(?:-\d+)?)\s*[.。．、]/);
+    if (prefixMatch) return prefixMatch[1];
   }
   return null;
 }
@@ -882,13 +921,15 @@ function buildLookupData(
     const labelId = normalizeId(row[index["关卡辅助名称"]]);
     const rawLevelName = (typeof levelNameId === "number" ? textMap.get(levelNameId) : "") || rawRemark;
     const rawLevelLabel = (typeof labelId === "number" ? textMap.get(labelId) : "") || rawAuxRemark;
-    const stageNo = extractStageNumber(rawAuxRemark, rawLevelLabel, rawRemark, rawLevelName) ?? (levelId >= 1001 && levelId <= 9999 ? levelId - 1000 : null);
-    if (stageNo === null) continue;
+    const stageKey = extractStageKey(rawAuxRemark, rawLevelLabel, rawRemark, rawLevelName) ?? (levelId >= 1001 && levelId <= 9999 ? String(levelId - 1000) : null);
+    if (stageKey === null) continue;
+    const stageNo = Number(stageKey.split("-")[0]);
 
     const monsters = levelMonsters.get(levelId);
-    const label = stripRichText(rawLevelLabel) || `第${stageNo}关`;
+    const label = stripRichText(rawLevelLabel) || `第${stageKey}关`;
     const levelName = stripLevelPrefix(rawLevelName);
     const record: LevelRecord & { rank: [number, number, number] } = {
+      stage_key: stageKey,
       stage_no: stageNo,
       level_id: levelId,
       level_label: label,
@@ -902,17 +943,17 @@ function buildLookupData(
         elite: mapMonsterList(monsters?.elite),
         boss: mapMonsterList(monsters?.boss),
       },
-      rank: [rawAuxRemark.includes(`第${stageNo}关`) || rawLevelLabel.includes(`第${stageNo}关`) ? 1 : 0, levelId >= 1001 && levelId <= 1999 ? 1 : 0, -levelId],
+      rank: [rawAuxRemark.includes(`第${stageKey}关`) || rawLevelLabel.includes(`第${stageKey}关`) ? 1 : 0, levelId >= 1001 && levelId <= 1999 ? 1 : 0, -levelId],
     };
     byLevelId[String(levelId)] = record;
-    duplicateCounter[String(stageNo)] = (duplicateCounter[String(stageNo)] ?? 0) + 1;
+    duplicateCounter[stageKey] = (duplicateCounter[stageKey] ?? 0) + 1;
     candidates.push(record);
   }
 
   const byStage: Record<string, LevelRecord> = {};
   const rankByStage = new Map<string, [number, number, number]>();
   for (const candidate of candidates) {
-    const key = String(candidate.stage_no);
+    const key = candidate.stage_key;
     const currentRank = rankByStage.get(key);
     if (!currentRank || compareRank(candidate.rank, currentRank) > 0) {
       const { rank: _rank, ...record } = candidate;

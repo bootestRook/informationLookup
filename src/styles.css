@@ -968,6 +968,26 @@ span.entry-condition-chip {
   border-top: 1px solid rgba(36, 39, 35, 0.08);
 }
 
+.monster-card-main {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.monster-card-copy {
+  min-width: 0;
+}
+
+.monster-image {
+  width: 82px;
+  height: 82px;
+  object-fit: contain;
+  background: #f6f7f1;
+  border: 1px solid rgba(36, 39, 35, 0.08);
+  border-radius: 8px;
+}
+
 .monster-title {
   display: flex;
   justify-content: space-between;
@@ -985,6 +1005,13 @@ span.entry-condition-chip {
   color: #798072;
   font-size: 12px;
   font-style: normal;
+}
+
+.monster-resource {
+  display: inline-block;
+  margin-bottom: 6px;
+  color: #75805f;
+  font-size: 12px;
 }
 
 .monster-item p {
@@ -1007,6 +1034,17 @@ span.entry-condition-chip {
   background: #f0f2e8;
   border-radius: 7px;
   font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .monster-card-main {
+    grid-template-columns: 64px 1fr;
+  }
+
+  .monster-image {
+    width: 64px;
+    height: 64px;
+  }
 }
 
 .none-text {

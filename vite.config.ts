@@ -72,7 +72,7 @@ export default defineConfig({
           }
 
           const url = new URL(req.url ?? "", "http://localhost");
-          const buffer = await readClientImage(url.searchParams.get("rootPath") ?? "", url.searchParams.get("name") ?? "");
+          const buffer = await readClientImage(url.searchParams.get("rootPath") ?? "", url.searchParams.get("name") ?? "", url.searchParams.get("kind") ?? "skin");
           if (!buffer) {
             res.statusCode = 404;
             res.end("Not Found");

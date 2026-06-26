@@ -29,6 +29,7 @@ type MatchedFile = {
 
 type MonsterInfo = {
   monster_id: number;
+  model_id: number | null;
   type: number;
   type_name: string;
   name_id: number | null;
@@ -38,11 +39,13 @@ type MonsterInfo = {
   raw_description: string;
   description: string;
   model_name: string;
+  frame_resource: string;
   waves: Array<{ wave: number | null; wave_type: number | null; count: number | null }>;
   total_count: number;
 };
 
 type LevelRecord = {
+  stage_key: string;
   stage_no: number;
   level_id: number;
   level_label: string;
@@ -606,6 +609,7 @@ function buildMonsterMap(workbook: XLSX.WorkBook, textMap: Map<number, string>):
     const monsterId = normalizeId(row[index["ID"]]);
     if (typeof monsterId !== "number") continue;
 
+    const modelId = normalizeId(row[index["模型ID"]]);
     const nameId = normalizeId(row[index["怪物名称ID"]]);
     const descriptionId = normalizeId(row[index["怪物描述ID"]]);
     const type = normalizeId(row[index["类型"]]);
@@ -614,6 +618,7 @@ function buildMonsterMap(workbook: XLSX.WorkBook, textMap: Map<number, string>):
 
     monsterMap.set(monsterId, {
       monster_id: monsterId,
+      model_id: typeof modelId === "number" ? modelId : null,
       type: typeof type === "number" ? type : 0,
       type_name: type === 1 ? "小怪" : type === 6 ? "精英怪" : type === 2 ? "首领" : String(type ?? ""),
       name_id: typeof nameId === "number" ? nameId : null,
@@ -623,6 +628,7 @@ function buildMonsterMap(workbook: XLSX.WorkBook, textMap: Map<number, string>):
       raw_description: rawDescription,
       description: stripRichText(rawDescription),
       model_name: toText(row[index["模型名称"]]),
+      frame_resource: "",
     });
   }
 
@@ -676,12 +682,12 @@ function buildLevelMonsters(
   return levelMonsters;
 }
 
-function extractStageNumber(...values: string[]): number | null {
+function extractStageKey(...values: string[]): string | null {
   for (const value of values) {
-    const stageMatch = value.match(/第\s*(\d+)\s*关/);
-    if (stageMatch) return Number(stageMatch[1]);
-    const prefixMatch = value.match(/^\s*(\d+)\s*[.。．、-]/);
-    if (prefixMatch) return Number(prefixMatch[1]);
+    const stageMatch = value.match(/第\s*(\d+(?:-\d+)?)\s*关/);
+    if (stageMatch) return stageMatch[1];
+    const prefixMatch = value.match(/^\s*(\d+(?:-\d+)?)\s*[.。．、]/);
+    if (prefixMatch) return prefixMatch[1];
   }
   return null;
 }
@@ -717,13 +723,15 @@ function buildLookupData(
     const labelId = normalizeId(row[index["关卡辅助名称"]]);
     const rawLevelName = (typeof levelNameId === "number" ? textMap.get(levelNameId) : "") || rawRemark;
     const rawLevelLabel = (typeof labelId === "number" ? textMap.get(labelId) : "") || rawAuxRemark;
-    const stageNo = extractStageNumber(rawAuxRemark, rawLevelLabel, rawRemark, rawLevelName) ?? (levelId >= 1001 && levelId <= 9999 ? levelId - 1000 : null);
-    if (stageNo === null) continue;
+    const stageKey = extractStageKey(rawAuxRemark, rawLevelLabel, rawRemark, rawLevelName) ?? (levelId >= 1001 && levelId <= 9999 ? String(levelId - 1000) : null);
+    if (stageKey === null) continue;
+    const stageNo = Number(stageKey.split("-")[0]);
 
-    const label = stripRichText(rawLevelLabel) || `第${stageNo}关`;
+    const label = stripRichText(rawLevelLabel) || `第${stageKey}关`;
     const levelName = stripLevelPrefix(rawLevelName);
     const monsters = levelMonsters.get(levelId);
     const record: LevelRecord & { rank: [number, number, number] } = {
+      stage_key: stageKey,
       stage_no: stageNo,
       level_id: levelId,
       level_label: label,
@@ -737,17 +745,17 @@ function buildLookupData(
         elite: mapMonsterList(monsters?.elite),
         boss: mapMonsterList(monsters?.boss),
       },
-      rank: [rawAuxRemark.includes(`第${stageNo}关`) || rawLevelLabel.includes(`第${stageNo}关`) ? 1 : 0, levelId >= 1001 && levelId <= 1999 ? 1 : 0, -levelId],
+      rank: [rawAuxRemark.includes(`第${stageKey}关`) || rawLevelLabel.includes(`第${stageKey}关`) ? 1 : 0, levelId >= 1001 && levelId <= 1999 ? 1 : 0, -levelId],
     };
 
     byLevelId[String(levelId)] = record;
-    duplicateCounter[String(stageNo)] = (duplicateCounter[String(stageNo)] ?? 0) + 1;
+    duplicateCounter[stageKey] = (duplicateCounter[stageKey] ?? 0) + 1;
     candidates.push(record);
   }
 
   const byStage: Record<string, LevelRecord> = {};
   for (const candidate of candidates) {
-    const key = String(candidate.stage_no);
+    const key = candidate.stage_key;
     const current = byStage[key] as (LevelRecord & { rank?: [number, number, number] }) | undefined;
     if (!current || compareRank(candidate.rank, current.rank ?? [0, 0, -Infinity]) > 0) {
       byStage[key] = candidate;
@@ -852,10 +860,9 @@ function findRecord(data: LookupData | null, query: string): LevelRecord | null 
   if (!data) return null;
   const trimmed = query.trim();
   if (!trimmed) return null;
-  const numericText = trimmed.replace(/[第关\s]/g, "");
-  if (/^\d+$/.test(numericText)) {
-    const value = Number(numericText);
-    return data.byStage[String(value)] ?? data.byLevelId[String(value)] ?? null;
+  const stageText = trimmed.replace(/[第关\s]/g, "");
+  if (/^\d+(?:-\d+)?$/.test(stageText)) {
+    return data.byStage[stageText] ?? data.byLevelId[stageText] ?? Object.values(data.byStage).find((record) => record.stage_key.startsWith(`${stageText}-`)) ?? null;
   }
   return (
     Object.values(data.byStage).find((record) => record.level_label_name.includes(trimmed) || record.level_name.includes(trimmed)) ?? null
@@ -874,8 +881,14 @@ function skinTotal(lookup: SkinLookupData | null): number {
   return lookup ? SKIN_CATEGORIES.reduce((sum, category) => sum + lookup[category.key].length, 0) : 0;
 }
 
-function clientImageUrl(clientRootPath: string, resourceName: string): string {
-  return `/api/client-image?rootPath=${encodeURIComponent(clientRootPath)}&name=${encodeURIComponent(resourceName)}`;
+function compareStage(left: LevelRecord, right: LevelRecord): number {
+  const [leftMain, leftSub = "0"] = left.stage_key.split("-");
+  const [rightMain, rightSub = "0"] = right.stage_key.split("-");
+  return Number(leftMain) - Number(rightMain) || Number(leftSub) - Number(rightSub) || left.level_id - right.level_id;
+}
+
+function clientImageUrl(clientRootPath: string, resourceName: string, kind = "skin"): string {
+  return `/api/client-image?rootPath=${encodeURIComponent(clientRootPath)}&name=${encodeURIComponent(resourceName)}&kind=${encodeURIComponent(kind)}`;
 }
 
 async function pickFolder(initialPath: string): Promise<string> {
@@ -929,12 +942,12 @@ function App() {
   const filteredRecords = useMemo(() => {
     if (!lookupData) return [];
     const value = query.trim();
-    const records = Object.values(lookupData.byStage).sort((a, b) => a.stage_no - b.stage_no);
+    const records = Object.values(lookupData.byStage).sort(compareStage);
     if (!value) return records;
-    const numberValue = Number(value.replace(/[第关\s]/g, ""));
+    const stageValue = value.replace(/[第关\s]/g, "");
     return records
       .filter((record) => {
-        if (Number.isFinite(numberValue) && String(record.stage_no).includes(String(numberValue))) return true;
+        if (/^\d+(?:-\d+)?$/.test(stageValue) && record.stage_key.includes(stageValue)) return true;
         return record.level_label_name.includes(value) || monsterSummary(record.monsters.small).includes(value) || monsterSummary(record.monsters.elite).includes(value) || monsterSummary(record.monsters.boss).includes(value);
       })
       .slice(0, 120);
@@ -1367,7 +1380,7 @@ function App() {
         </section>
 
         {activeTab === "levels" ? (
-          <LevelWorkspace currentRecord={currentRecord} filteredRecords={filteredRecords} selectedStage={selectedStage} onSelectStage={setSelectedStage} />
+          <LevelWorkspace currentRecord={currentRecord} filteredRecords={filteredRecords} selectedStage={selectedStage} clientRootPath={clientPathInput} onSelectStage={setSelectedStage} />
         ) : activeTab === "gems" ? (
           <GemWorkspace gemLookup={gemLookup} filteredGems={filteredGems} selectedGem={selectedGem} onSelectGem={(record) => setSelectedGemId(record.item_id)} />
         ) : activeTab === "skins" ? (
@@ -1409,11 +1422,13 @@ function App() {
 function LevelWorkspace({
   currentRecord,
   filteredRecords,
+  clientRootPath,
   onSelectStage,
 }: {
   currentRecord: LevelRecord | null;
   filteredRecords: LevelRecord[];
   selectedStage: string;
+  clientRootPath: string;
   onSelectStage: (stage: string) => void;
 }) {
   return (
@@ -1427,7 +1442,7 @@ function LevelWorkspace({
           {currentRecord && <span className="level-chip">ID {currentRecord.level_id}</span>}
         </div>
 
-        {currentRecord ? <LevelDetail record={currentRecord} /> : <EmptyState />}
+        {currentRecord ? <LevelDetail record={currentRecord} clientRootPath={clientRootPath} /> : <EmptyState />}
       </div>
 
       <div className="list-panel">
@@ -1443,9 +1458,9 @@ function LevelWorkspace({
               type="button"
               key={record.level_id}
               className={currentRecord?.level_id === record.level_id ? "level-row selected" : "level-row"}
-              onClick={() => onSelectStage(String(record.stage_no))}
+              onClick={() => onSelectStage(record.stage_key)}
             >
-              <span>第{record.stage_no}关</span>
+              <span>{record.level_label}</span>
               <strong>{record.level_name}</strong>
               <small>{monsterSummary(record.monsters.small)}</small>
             </button>
@@ -2275,7 +2290,7 @@ function EmptyState() {
   );
 }
 
-function LevelDetail({ record }: { record: LevelRecord }) {
+function LevelDetail({ record, clientRootPath }: { record: LevelRecord; clientRootPath: string }) {
   return (
     <div className="detail-stack">
       <div className="level-overview">
@@ -2293,14 +2308,14 @@ function LevelDetail({ record }: { record: LevelRecord }) {
         </div>
       </div>
 
-      <MonsterSection title="小怪" tone="small" monsters={record.monsters.small} />
-      <MonsterSection title="精英怪" tone="elite" monsters={record.monsters.elite} />
-      <MonsterSection title="首领" tone="boss" monsters={record.monsters.boss} />
+      <MonsterSection title="小怪" tone="small" monsters={record.monsters.small} clientRootPath={clientRootPath} />
+      <MonsterSection title="精英怪" tone="elite" monsters={record.monsters.elite} clientRootPath={clientRootPath} />
+      <MonsterSection title="首领" tone="boss" monsters={record.monsters.boss} clientRootPath={clientRootPath} />
     </div>
   );
 }
 
-function MonsterSection({ title, tone, monsters }: { title: string; tone: "small" | "elite" | "boss"; monsters: MonsterInfo[] }) {
+function MonsterSection({ title, tone, monsters, clientRootPath }: { title: string; tone: "small" | "elite" | "boss"; monsters: MonsterInfo[]; clientRootPath: string }) {
   return (
     <section className={`monster-section ${tone}`}>
       <div className="monster-section-title">
@@ -2311,19 +2326,27 @@ function MonsterSection({ title, tone, monsters }: { title: string; tone: "small
         <div className="monster-list">
           {monsters.map((monster) => (
             <article className="monster-item" key={`${tone}-${monster.monster_id}`}>
-              <div className="monster-title">
-                <div>
-                  <strong>{monster.name}</strong>
-                  <span>ID {monster.monster_id}</span>
+              <div className="monster-card-main">
+                {monster.frame_resource && clientRootPath.trim() && (
+                  <img className="monster-image" src={clientImageUrl(clientRootPath, monster.frame_resource, "monster")} alt={monster.name} loading="lazy" />
+                )}
+                <div className="monster-card-copy">
+                  <div className="monster-title">
+                    <div>
+                      <strong>{monster.name}</strong>
+                      <span>ID {monster.monster_id}{monster.model_id !== null ? ` · 模型ID ${monster.model_id}` : ""}</span>
+                    </div>
+                    <em>总数 {monster.total_count}</em>
+                  </div>
+                  {monster.frame_resource && <span className="monster-resource">{monster.frame_resource}</span>}
+                  <p>{monster.description || "无描述"}</p>
+                  <div className="wave-line">
+                    {monster.waves.slice(0, 12).map((wave, index) => (
+                      <span key={`${monster.monster_id}-${index}`}>W{wave.wave ?? "?"}:{wave.count ?? "-"}</span>
+                    ))}
+                    {monster.waves.length > 12 && <span>更多 {monster.waves.length - 12}</span>}
+                  </div>
                 </div>
-                <em>总数 {monster.total_count}</em>
-              </div>
-              <p>{monster.description || "无描述"}</p>
-              <div className="wave-line">
-                {monster.waves.slice(0, 12).map((wave, index) => (
-                  <span key={`${monster.monster_id}-${index}`}>W{wave.wave ?? "?"}:{wave.count ?? "-"}</span>
-                ))}
-                {monster.waves.length > 12 && <span>更多 {monster.waves.length - 12}</span>}
               </div>
             </article>
           ))}

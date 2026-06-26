@@ -30,6 +30,14 @@ if "%ERRORLEVEL%"=="0" (
   exit /b 0
 )
 
+powershell -NoProfile -Command "$c = [Net.Sockets.TcpClient]::new(); try { $a = $c.BeginConnect('127.0.0.1', 5178, $null, $null); if ($a.AsyncWaitHandle.WaitOne(500)) { $c.EndConnect($a); exit 0 }; exit 1 } catch { exit 1 } finally { $c.Close() }"
+if "%ERRORLEVEL%"=="0" (
+  echo [ERROR] Port 5178 is already in use, but the app is not responding.
+  echo Close the existing Node.js/cmd window using port 5178, then run this file again.
+  pause
+  exit /b 1
+)
+
 echo Starting dev server...
 start "InformationLookup" cmd /k "cd /d ""%~dp0"" && set ""PATH=%LOCAL_NODE%;%PATH%"" && npm run dev -- --host 127.0.0.1 --port 5178 --strictPort"
 powershell -NoProfile -Command "Start-Sleep -Seconds 3"
