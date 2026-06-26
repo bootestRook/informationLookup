@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { readClientImage, readSavedSettings, saveSavedRootPath, scanLevelLookup } from "./server/levelLookup";
+import { cacheIndexedImages, readClientImage, readSavedSettings, saveSavedRootPath, scanLevelLookup } from "./server/levelLookup";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -54,6 +54,7 @@ export default defineConfig({
             }
             const body = JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}") as { rootPath?: string; clientRootPath?: string };
             const result = await scanLevelLookup(body.rootPath ?? "");
+            await cacheIndexedImages(result, body.clientRootPath ?? "");
             await saveSavedRootPath(result.rootPath, body.clientRootPath ?? "");
             res.setHeader("Content-Type", "application/json; charset=utf-8");
             res.end(JSON.stringify(result));

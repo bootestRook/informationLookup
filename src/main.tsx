@@ -891,6 +891,27 @@ function clientImageUrl(clientRootPath: string, resourceName: string, kind = "sk
   return `/api/client-image?rootPath=${encodeURIComponent(clientRootPath)}&name=${encodeURIComponent(resourceName)}&kind=${encodeURIComponent(kind)}`;
 }
 
+function localImageUrl(resourceName: string, kind: "monster" | "skin"): string {
+  return `/indexed-images/${kind}/${encodeURIComponent(resourceName.replace(/\.png$/i, ""))}.png`;
+}
+
+function IndexedImage({ className, clientRootPath, name, kind, alt }: { className?: string; clientRootPath: string; name: string; kind: "monster" | "skin"; alt: string }) {
+  const [failedClientSrc, setFailedClientSrc] = useState("");
+  const clientSrc = clientRootPath.trim() ? clientImageUrl(clientRootPath, name, kind) : "";
+  const src = clientSrc && failedClientSrc !== clientSrc ? clientSrc : localImageUrl(name, kind);
+  return (
+    <img
+      className={className}
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onError={() => {
+        if (src === clientSrc) setFailedClientSrc(clientSrc);
+      }}
+    />
+  );
+}
+
 async function pickFolder(initialPath: string): Promise<string> {
   const response = await fetch(`/api/pick-folder?initial=${encodeURIComponent(initialPath)}`);
   const payload = (await response.json()) as { path?: string; error?: string };
@@ -956,9 +977,9 @@ function App() {
     if (!gemLookup) return [];
     const value = query.trim();
     const records = gemLookup.records;
-    if (!value) return records.slice(0, 240);
-    return records
-      .filter((record) => {
+    if (!value) return records;
+    return records.filter((record) => {
+      if (/^[123]$/.test(value)) return String(record.season_id ?? "") === value;
         const haystack = [
           record.item_id,
           record.name,
@@ -974,8 +995,7 @@ function App() {
           .join(" ")
           .toLowerCase();
         return haystack.includes(value.toLowerCase());
-      })
-      .slice(0, 240);
+      });
   }, [gemLookup, query]);
   const selectedGem = useMemo(() => {
     if (!gemLookup) return null;
@@ -2240,7 +2260,7 @@ function SkinDetail({ record, clientRootPath, onOpenSkin }: { record: SkinRecord
           <div className="skin-image-list">
             {imageAssets.map((image) => (
               <figure className="skin-image-card" key={image.name}>
-                {clientRootPath.trim() ? <img src={clientImageUrl(clientRootPath, image.name)} alt={`${record.name}${image.label}`} loading="lazy" /> : <div className="skin-image-missing">未设置客户端资源根路径</div>}
+                <IndexedImage clientRootPath={clientRootPath} name={image.name} kind="skin" alt={`${record.name}${image.label}`} />
                 <figcaption>{image.label} · {image.name}</figcaption>
               </figure>
             ))}
@@ -2327,9 +2347,7 @@ function MonsterSection({ title, tone, monsters, clientRootPath }: { title: stri
           {monsters.map((monster) => (
             <article className="monster-item" key={`${tone}-${monster.monster_id}`}>
               <div className="monster-card-main">
-                {monster.frame_resource && clientRootPath.trim() && (
-                  <img className="monster-image" src={clientImageUrl(clientRootPath, monster.frame_resource, "monster")} alt={monster.name} loading="lazy" />
-                )}
+                {monster.frame_resource && <IndexedImage className="monster-image" clientRootPath={clientRootPath} name={monster.frame_resource} kind="monster" alt={monster.name} />}
                 <div className="monster-card-copy">
                   <div className="monster-title">
                     <div>

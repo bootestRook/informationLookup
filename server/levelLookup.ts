@@ -179,6 +179,7 @@ const REQUIRED_FILES: Array<{ key: RequiredFileKey; label: string; fileName: str
 
 const settingsPath = path.resolve(process.cwd(), ".local", "level-info-settings.json");
 const cachePath = path.resolve(process.cwd(), ".local", "level-info-cache.json");
+const indexedImageRoot = path.resolve(process.cwd(), "public", "indexed-images");
 const cacheVersion = 8;
 const tagPattern = /<[^>]+>/g;
 const partNameById = new Map<number, string>([
@@ -269,6 +270,33 @@ export async function saveSavedRootPath(rootPath: string, clientRootPath = ""): 
   const normalizedClientRoot = clientRootPath.trim().replace(/^"+|"+$/g, "");
   await fs.mkdir(path.dirname(settingsPath), { recursive: true });
   await fs.writeFile(settingsPath, `${JSON.stringify({ rootPath: normalizedRoot, clientRootPath: normalizedClientRoot }, null, 2)}\n`, "utf-8");
+}
+
+export async function cacheIndexedImages(result: ScanResult, clientRootPath: string): Promise<void> {
+  const rootText = clientRootPath.trim().replace(/^"+|"+$/g, "");
+  if (!rootText) return;
+
+  const images = new Map<string, { kind: "monster" | "skin"; name: string }>();
+  for (const record of Object.values(result.lookup.byStage)) {
+    for (const monster of [...record.monsters.small, ...record.monsters.elite, ...record.monsters.boss]) {
+      if (monster.frame_resource) images.set(`monster:${monster.frame_resource}`, { kind: "monster", name: monster.frame_resource });
+    }
+  }
+  for (const records of Object.values(result.skinLookup)) {
+    for (const skin of records) {
+      for (const image of skin.image_assets) images.set(`skin:${image.name}`, { kind: "skin", name: image.name });
+    }
+  }
+
+  for (const image of images.values()) {
+    const fileName = `${path.basename(image.name).replace(/\.png$/i, "")}.png`;
+    const outputPath = path.join(indexedImageRoot, image.kind, fileName);
+    if (await fs.stat(outputPath).then((stat) => stat.isFile()).catch(() => false)) continue;
+    const buffer = await readClientImage(rootText, image.name, image.kind);
+    if (!buffer) continue;
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    await fs.writeFile(outputPath, buffer);
+  }
 }
 
 export async function readClientImage(clientRootPath: string, resourceName: string, kind = "skin"): Promise<Buffer | null> {
