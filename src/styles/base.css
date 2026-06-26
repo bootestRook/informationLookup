@@ -1,0 +1,36 @@
+:root {
+  font-family:
+    "Segoe UI",
+    "Microsoft YaHei",
+    system-ui,
+    sans-serif;
+  color: #20211f;
+  background: #eef0e9;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 1100px;
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(244, 246, 241, 0.97), rgba(238, 241, 232, 0.92)),
+    radial-gradient(circle at 24% 10%, rgba(198, 224, 100, 0.18), transparent 34%);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}

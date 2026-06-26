@@ -1,0 +1,126 @@
+﻿.entry-graph {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(190px, 240px) minmax(180px, 1fr);
+  gap: 22px;
+  align-items: center;
+  min-height: 320px;
+  padding: 18px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.78)),
+    repeating-linear-gradient(0deg, transparent, transparent 23px, rgba(124, 137, 107, 0.08) 24px),
+    repeating-linear-gradient(90deg, transparent, transparent 23px, rgba(124, 137, 107, 0.08) 24px);
+  border: 1px solid rgba(36, 39, 35, 0.08);
+  border-radius: 14px;
+}
+
+.entry-graph-column {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.entry-graph-label {
+  justify-self: start;
+  padding: 4px 8px;
+  color: #596049;
+  background: #edf5d2;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.entry-graph-label.conflict {
+  color: #8d4935;
+  background: #ffe4d8;
+}
+
+.entry-graph-center {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.entry-graph-center::before,
+.entry-graph-center::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 22px;
+  height: 1px;
+  background: #a7b09b;
+}
+
+.entry-graph-center::before {
+  right: 100%;
+}
+
+.entry-graph-center::after {
+  left: 100%;
+}
+
+.graph-node {
+  position: relative;
+  width: 100%;
+  min-height: 58px;
+  padding: 10px 12px;
+  text-align: left;
+  color: #30342e;
+  background: rgba(255, 255, 255, 0.94);
+  border: 2px solid #b8d6ff;
+  border-radius: 13px;
+  box-shadow: 0 8px 20px rgba(31, 35, 28, 0.05);
+}
+
+.graph-node.current {
+  display: grid;
+  align-content: center;
+  min-height: 118px;
+  color: #ffffff;
+  background: #ff4f64;
+  border-color: #ff4f64;
+  text-align: center;
+}
+
+.graph-node.conflict {
+  border-color: #ffb08f;
+}
+
+.graph-node.ghost {
+  display: grid;
+  place-items: center;
+  color: #87907c;
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.graph-node.link {
+  cursor: pointer;
+}
+
+.graph-node.link:hover {
+  background: #f2f7df;
+  border-color: #8fb15f;
+}
+
+.graph-node strong {
+  display: block;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.graph-node p {
+  margin: 5px 0 0;
+  color: inherit;
+  line-height: 1.45;
+  font-size: 12px;
+}
+
+.entry-skill-tabs {
+  overflow: auto;
+}
+
+.entry-skill-tabs .subtab-button {
+  flex: 0 0 auto;
+}
+

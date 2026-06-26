@@ -1,0 +1,133 @@
+.gem-content-grid {
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.gem-table {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.gem-row {
+  display: grid;
+  grid-template-columns: 90px minmax(260px, 1fr) 54px 54px 66px 84px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 50px;
+  padding: 9px 11px;
+  text-align: left;
+  color: #262923;
+  background: rgba(246, 247, 241, 0.74);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.gem-row + .gem-row {
+  margin-top: 6px;
+}
+
+.gem-row strong {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gem-row span {
+  color: #687061;
+  font-size: 12px;
+}
+
+.gem-row .gem-id {
+  color: #76805c;
+  font-weight: 750;
+}
+
+.gem-row.selected {
+  background: #eaf4c9;
+  border-color: rgba(108, 130, 45, 0.32);
+}
+
+.gem-side-panel {
+  min-width: 0;
+}
+
+.gem-detail {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+}
+
+.gem-detail-card,
+.gem-effect-card,
+.gem-raw-card,
+.gem-stat-grid div {
+  background: #f6f7f1;
+  border: 1px solid rgba(36, 39, 35, 0.07);
+  border-radius: 12px;
+}
+
+.gem-detail-card {
+  padding: 11px 12px;
+}
+
+.gem-detail-card span,
+.gem-effect-card span,
+.gem-raw-card span,
+.gem-stat-grid span {
+  display: block;
+  color: #777d70;
+  font-size: 12px;
+}
+
+.gem-detail-card strong,
+.gem-stat-grid strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 17px;
+}
+
+.gem-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.gem-tags span {
+  padding: 6px 9px;
+  color: #38402b;
+  background: #e6f4b6;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.gem-effect-card,
+.gem-raw-card {
+  padding: 12px;
+}
+
+.gem-effect-card p,
+.gem-raw-card p {
+  margin: 7px 0 0;
+  color: #30342e;
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.gem-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.gem-stat-grid div {
+  padding: 10px 12px;
+}

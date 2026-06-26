@@ -1,0 +1,141 @@
+.level-overview {
+  display: grid;
+  grid-template-columns: 130px 1fr 130px;
+  gap: 8px;
+}
+
+.level-overview div {
+  padding: 11px 12px;
+  background: #f6f7f1;
+  border: 1px solid rgba(36, 39, 35, 0.07);
+  border-radius: 12px;
+}
+
+.level-overview span {
+  display: block;
+  color: #777d70;
+  font-size: 12px;
+}
+
+.level-overview strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 17px;
+}
+
+.monster-section {
+  border: 1px solid rgba(36, 39, 35, 0.08);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.monster-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #f4f5ed;
+  border-left: 4px solid #8f9c57;
+}
+
+.monster-section.elite .monster-section-title {
+  border-left-color: #9f6fd8;
+}
+
+.monster-section.boss .monster-section-title {
+  border-left-color: #d36747;
+}
+
+.monster-section-title span,
+.monster-section-title strong {
+  font-size: 13px;
+}
+
+.monster-list {
+  display: grid;
+}
+
+.monster-item {
+  padding: 12px;
+  border-top: 1px solid rgba(36, 39, 35, 0.08);
+}
+
+.monster-card-main {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.monster-card-copy {
+  min-width: 0;
+}
+
+.monster-image {
+  width: 82px;
+  height: 82px;
+  object-fit: contain;
+  background: #f6f7f1;
+  border: 1px solid rgba(36, 39, 35, 0.08);
+  border-radius: 8px;
+}
+
+.monster-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 7px;
+}
+
+.monster-title strong {
+  display: block;
+  font-size: 15px;
+}
+
+.monster-title span,
+.monster-title em {
+  color: #798072;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.monster-resource {
+  display: inline-block;
+  margin-bottom: 6px;
+  color: #75805f;
+  font-size: 12px;
+}
+
+.monster-item p {
+  white-space: pre-line;
+  color: #40443b;
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.wave-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.wave-line span {
+  padding: 4px 7px;
+  color: #596049;
+  background: #f0f2e8;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .monster-card-main {
+    grid-template-columns: 64px 1fr;
+  }
+
+  .monster-image {
+    width: 64px;
+    height: 64px;
+  }
+}

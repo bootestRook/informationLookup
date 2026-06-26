@@ -1,0 +1,22 @@
+@media (max-width: 1180px) {
+  body {
+    min-width: 0;
+  }
+
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+  }
+
+  .content-grid,
+  .search-band {
+    grid-template-columns: 1fr;
+  }
+
+  .level-overview {
+    grid-template-columns: 1fr;
+  }
+}

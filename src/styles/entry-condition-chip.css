@@ -1,0 +1,65 @@
+﻿.entry-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 58px;
+  padding: 0 10px 10px;
+  overflow: auto;
+}
+
+.entry-condition-chip {
+  min-height: 24px;
+  padding: 3px 7px;
+  color: #40502a;
+  background: #edf5d2;
+  border: 1px solid rgba(108, 130, 45, 0.18);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+span.entry-condition-chip {
+  cursor: default;
+}
+
+.entry-condition-chip.conflict {
+  color: #8d4935;
+  background: #ffe4d8;
+  border-color: rgba(188, 89, 54, 0.2);
+}
+
+.entry-condition-chip.or-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.entry-condition-chip.or-chip button {
+  min-width: 24px;
+  min-height: 18px;
+  padding: 1px 5px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.58);
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.entry-condition-chip.or-chip em {
+  font-style: normal;
+  opacity: 0.72;
+}
+
+.entry-condition-chip:hover {
+  background: #ddeb9d;
+}
+
+.entry-condition-chip.conflict:hover {
+  background: #ffd2bf;
+}
+
+.entry-detail-inline {
+  display: grid;
+  gap: 12px;
+}
