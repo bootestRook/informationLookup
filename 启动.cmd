@@ -3,14 +3,17 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
+set "LOCAL_NODE=%~dp0.local\nodejs"
+if exist "%LOCAL_NODE%\node.exe" set "PATH=%LOCAL_NODE%;%PATH%"
+
 where node >nul 2>nul || (
-  echo [ERROR] Node.js not found. Install Node.js LTS first: https://nodejs.org/
-  pause
-  exit /b 1
+  echo Node.js not found. Downloading portable Node.js LTS...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $nodeRoot=Join-Path (Get-Location) '.local\nodejs'; New-Item -ItemType Directory -Force -Path '.local' | Out-Null; $index=Invoke-RestMethod 'https://nodejs.org/dist/index.json'; $version=($index | Where-Object { $_.lts } | Select-Object -First 1).version; $zip='node-' + $version + '-win-x64.zip'; $url='https://nodejs.org/dist/' + $version + '/' + $zip; $tmp=Join-Path $env:TEMP $zip; $extract=Join-Path $env:TEMP ('node-' + $version + '-win-x64'); Invoke-WebRequest -UseBasicParsing $url -OutFile $tmp; if(Test-Path $extract){Remove-Item $extract -Recurse -Force}; Expand-Archive $tmp $env:TEMP -Force; if(Test-Path $nodeRoot){Remove-Item $nodeRoot -Recurse -Force}; Move-Item $extract $nodeRoot" || goto fail
+  set "PATH=%LOCAL_NODE%;%PATH%"
 )
 
 where npm >nul 2>nul || (
-  echo [ERROR] npm not found. Reinstall Node.js LTS first: https://nodejs.org/
+  echo [ERROR] npm not found.
   pause
   exit /b 1
 )
@@ -28,7 +31,7 @@ if "%ERRORLEVEL%"=="0" (
 )
 
 echo Starting dev server...
-start "InformationLookup" cmd /k "cd /d ""%~dp0"" && npm run dev -- --host 127.0.0.1 --port 5178 --strictPort"
+start "InformationLookup" cmd /k "cd /d ""%~dp0"" && set ""PATH=%LOCAL_NODE%;%PATH%"" && npm run dev -- --host 127.0.0.1 --port 5178 --strictPort"
 powershell -NoProfile -Command "Start-Sleep -Seconds 3"
 start "" "http://127.0.0.1:5178/"
 exit /b 0

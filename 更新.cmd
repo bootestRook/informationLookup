@@ -3,6 +3,9 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
+set "LOCAL_NODE=%~dp0.local\nodejs"
+if exist "%LOCAL_NODE%\node.exe" set "PATH=%LOCAL_NODE%;%PATH%"
+
 where git >nul 2>nul || (
   echo [ERROR] Git not found.
   pause
@@ -10,7 +13,7 @@ where git >nul 2>nul || (
 )
 
 where npm >nul 2>nul || (
-  echo [ERROR] npm not found. Install Node.js LTS first: https://nodejs.org/
+  echo [ERROR] npm not found. Run 启动.cmd once to install local Node.js.
   pause
   exit /b 1
 )
