@@ -106,12 +106,18 @@ type SkinReference = {
   name: string;
 };
 
+type SkinImageAsset = {
+  label: string;
+  name: string;
+};
+
 type SkinRecord = {
   category: SkinCategoryKey;
   name: string;
   skin_id: number;
   item_id: number | null;
   skill_name: string;
+  image_assets: SkinImageAsset[];
   prerequisite_skins: SkinReference[];
   levels: SkinLevel[];
 };
@@ -172,6 +178,7 @@ const SKIN_CATEGORIES: Array<{ key: SkinCategoryKey; label: string; configSheet:
 ];
 
 const SAVED_ROOT_PATH_KEY = "information-lookup.rootPath";
+const SAVED_CLIENT_ROOT_PATH_KEY = "information-lookup.clientRootPath";
 const partNameById = new Map<number, string>([
   [1, "头盔"],
   [2, "衣服"],
@@ -202,11 +209,27 @@ function getInitialRootPath(): string {
   return getStoredRootPath() || "C:\\project\\T5game_data";
 }
 
+function getInitialClientRootPath(): string {
+  try {
+    return window.localStorage.getItem(SAVED_CLIENT_ROOT_PATH_KEY) || "C:\\project\\T5game_client";
+  } catch {
+    return "C:\\project\\T5game_client";
+  }
+}
+
 function saveRootPath(rootPath: string) {
   try {
     window.localStorage.setItem(SAVED_ROOT_PATH_KEY, rootPath);
   } catch {
     // Storage can be unavailable in restricted browser modes. The scan still works for the current session.
+  }
+}
+
+function saveClientRootPath(rootPath: string) {
+  try {
+    window.localStorage.setItem(SAVED_CLIENT_ROOT_PATH_KEY, rootPath);
+  } catch {
+    // Same local convenience as the data root path.
   }
 }
 
@@ -395,6 +418,26 @@ function textById(textMap: Map<number, string>, value: CellValue): string {
   return stripRichText(textMap.get(id) || `[文本表未找到:${id}]`);
 }
 
+function pushImageAsset(images: SkinImageAsset[], seen: Set<string>, label: string, value: CellValue) {
+  const name = toText(value);
+  if (!name || seen.has(name)) return;
+  seen.add(name);
+  images.push({ label, name });
+}
+
+function collectSkinImages(row: Record<string, CellValue>, category: SkinCategoryKey): SkinImageAsset[] {
+  const images: SkinImageAsset[] = [];
+  const seen = new Set<string>();
+  if (category === "wall" || category === "wallChroma") {
+    pushImageAsset(images, seen, "展示", row["展示图片"]);
+    pushImageAsset(images, seen, "图标", row["时装图标"]);
+    return images.slice(0, 2);
+  }
+  pushImageAsset(images, seen, "男", row["展示图标_男"] || row["时装图标"]);
+  pushImageAsset(images, seen, "女", row["展示图标_女"] || row["时装图标_女"]);
+  return images;
+}
+
 function buildEntryLookupData(entryWorkbook: XLSX.WorkBook, skillWorkbook: XLSX.WorkBook, textMap: Map<number, string>): EntryLookupData {
   const skillNameById = new Map<number, string>();
   for (const row of sheetObjects(skillWorkbook, "源素配置表")) {
@@ -540,6 +583,7 @@ function buildSkinLookupData(skinWorkbook: XLSX.WorkBook, skillWorkbook: XLSX.Wo
         skin_id: skinId,
         item_id: typeof itemId === "number" ? itemId : null,
         skill_name: typeof skillId === "number" ? skillNameById.get(skillId) || `[技能未找到:${skillId}]` : "",
+        image_assets: collectSkinImages(row, category.key),
         prerequisite_skins: category.withPrerequisite
           ? [1, 2, 3, 4, 5]
               .map((index) => normalizeId(row[`激活前置皮肤ID_${index}`]))
@@ -830,6 +874,17 @@ function skinTotal(lookup: SkinLookupData | null): number {
   return lookup ? SKIN_CATEGORIES.reduce((sum, category) => sum + lookup[category.key].length, 0) : 0;
 }
 
+function clientImageUrl(clientRootPath: string, resourceName: string): string {
+  return `/api/client-image?rootPath=${encodeURIComponent(clientRootPath)}&name=${encodeURIComponent(resourceName)}`;
+}
+
+async function pickFolder(initialPath: string): Promise<string> {
+  const response = await fetch(`/api/pick-folder?initial=${encodeURIComponent(initialPath)}`);
+  const payload = (await response.json()) as { path?: string; error?: string };
+  if (!response.ok || payload.error) throw new Error(payload.error ?? "选择目录失败");
+  return payload.path ?? "";
+}
+
 function tabLabel(tab: AppTab): string {
   if (tab === "levels") return "关卡信息";
   if (tab === "gems") return "宝石信息";
@@ -856,6 +911,7 @@ function App() {
   const [loadState, setLoadState] = useState<LoadState>({ status: "idle", message: "绑定数据目录后自动解析关卡信息" });
   const [rootName, setRootName] = useState("");
   const [pathInput, setPathInput] = useState(getInitialRootPath);
+  const [clientPathInput, setClientPathInput] = useState(getInitialClientRootPath);
   const [matchedFiles, setMatchedFiles] = useState<MatchedFile[]>([]);
   const [lookupData, setLookupData] = useState<LookupData | null>(null);
   const [gemLookup, setGemLookup] = useState<GemLookup | null>(null);
@@ -953,27 +1009,31 @@ function App() {
       if (didAutoLoad.current) return;
 
       let savedPath = "";
+      let savedClientPath = "";
       try {
         const response = await fetch("/api/level-info/settings");
         if (response.ok) {
-          const payload = (await response.json()) as { rootPath?: string };
+          const payload = (await response.json()) as { rootPath?: string; clientRootPath?: string };
           savedPath = payload.rootPath?.trim() ?? "";
+          savedClientPath = payload.clientRootPath?.trim() ?? "";
         }
       } catch {
         savedPath = "";
       }
 
       savedPath = savedPath || getStoredRootPath() || "";
+      savedClientPath = savedClientPath || getInitialClientRootPath();
       if (!savedPath || didAutoLoad.current) return;
       didAutoLoad.current = true;
       setPathInput(savedPath);
-      await scanPath(savedPath, "正在读取上次绑定路径并刷新索引");
+      setClientPathInput(savedClientPath);
+      await scanPath(savedPath, "正在读取上次绑定路径并刷新索引", savedClientPath);
     }
 
     void loadSavedPath();
   }, []);
 
-  async function scanPath(rootPath: string, loadingMessage = "正在扫描路径下的 xls 表格") {
+  async function scanPath(rootPath: string, loadingMessage = "正在扫描路径下的 xls 表格", clientRootPath = clientPathInput) {
     const trimmedPath = rootPath.trim();
     if (!trimmedPath) {
       setLoadState({ status: "error", message: "请先填写文件夹路径" });
@@ -985,13 +1045,14 @@ function App() {
       const response = await fetch("/api/level-info/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rootPath: trimmedPath }),
+        body: JSON.stringify({ rootPath: trimmedPath, clientRootPath: clientRootPath.trim() }),
       });
       const payload = (await response.json()) as { rootName?: string; files?: MatchedFile[]; lookup?: LookupData; gemLookup?: GemLookup; skinLookup?: SkinLookupData; entryLookup?: EntryLookupData; error?: string };
       if (!response.ok || payload.error || !payload.lookup || !payload.gemLookup || !payload.skinLookup || !payload.entryLookup || !payload.files) {
         throw new Error(payload.error ?? "扫描失败");
       }
       saveRootPath(trimmedPath);
+      saveClientRootPath(clientRootPath.trim());
       setPathInput(trimmedPath);
       setRootName(payload.rootName || trimmedPath);
       setMatchedFiles(payload.files);
@@ -1020,6 +1081,24 @@ function App() {
 
   async function refreshData() {
     await scanPath(pathInput, "正在刷新已绑定目录下的 xls 表格");
+  }
+
+  async function browseDataPath() {
+    try {
+      const selected = await pickFolder(pathInput);
+      if (selected) setPathInput(selected);
+    } catch (error) {
+      setLoadState({ status: "error", message: error instanceof Error ? error.message : "选择目录失败" });
+    }
+  }
+
+  async function browseClientPath() {
+    try {
+      const selected = await pickFolder(clientPathInput);
+      if (selected) setClientPathInput(selected);
+    } catch (error) {
+      setLoadState({ status: "error", message: error instanceof Error ? error.message : "选择目录失败" });
+    }
   }
 
   async function bindFolder() {
@@ -1056,6 +1135,7 @@ function App() {
       setSelectedGemId(gems.records[0]?.item_id ?? null);
       setSelectedSkinId(skins.person[0]?.skin_id ?? null);
       setSelectedEntryId(entries.records[0]?.entry_id ?? null);
+      saveClientRootPath(clientPathInput.trim());
       setQuery("");
       setLoadState({ status: "ready", message: `已生成 ${Object.keys(lookup.byStage).length} 个关卡索引，${gems.records.length} 条宝石索引，${skinTotal(skins)} 条皮肤索引，${entries.records.length} 条局内词条` });
     } catch (error) {
@@ -1134,7 +1214,21 @@ function App() {
           </div>
           <label className="path-input">
             <span>文件夹路径</span>
-            <input value={pathInput} onChange={(event) => setPathInput(event.target.value)} placeholder="例如 C:\\project\\T5game_data" />
+            <div className="path-field">
+              <input value={pathInput} onChange={(event) => setPathInput(event.target.value)} placeholder="例如 C:\\project\\T5game_data" />
+              <button type="button" aria-label="浏览数据路径" title="浏览数据路径" onClick={browseDataPath}>
+                <FolderOpen size={16} />
+              </button>
+            </div>
+          </label>
+          <label className="path-input">
+            <span>客户端资源根路径</span>
+            <div className="path-field">
+              <input value={clientPathInput} onChange={(event) => setClientPathInput(event.target.value)} placeholder="例如 C:\\project\\T5game_client" />
+              <button type="button" aria-label="浏览客户端资源路径" title="浏览客户端资源路径" onClick={browseClientPath}>
+                <FolderOpen size={16} />
+              </button>
+            </div>
           </label>
           <button className="primary-action" type="button" onClick={bindPath}>
             {loadState.status === "loading" ? <ArrowClockwise size={18} className="spin" /> : <FolderOpen size={18} />}
@@ -1143,10 +1237,6 @@ function App() {
           <button className="secondary-action refresh-action" type="button" onClick={refreshData} disabled={loadState.status === "loading"}>
             <ArrowClockwise size={17} className={loadState.status === "loading" ? "spin" : ""} />
             刷新数据
-          </button>
-          <button className="secondary-action" type="button" onClick={bindFolder}>
-            <FolderOpen size={17} />
-            选择目录
           </button>
         </div>
 
@@ -1290,6 +1380,7 @@ function App() {
             skinLookup={skinLookup}
             filteredSkins={filteredSkins}
             selectedSkin={selectedSkin}
+            clientRootPath={clientPathInput}
             onSelectSkin={(record) => setSelectedSkinId(record.skin_id)}
             onOpenSkin={(reference) => {
               if (!reference.category) return;
@@ -2049,6 +2140,7 @@ function SkinWorkspace({
   skinLookup,
   filteredSkins,
   selectedSkin,
+  clientRootPath,
   onSelectSkin,
   onOpenSkin,
 }: {
@@ -2057,6 +2149,7 @@ function SkinWorkspace({
   skinLookup: SkinLookupData | null;
   filteredSkins: SkinRecord[];
   selectedSkin: SkinRecord | null;
+  clientRootPath: string;
   onSelectSkin: (record: SkinRecord) => void;
   onOpenSkin: (reference: SkinReference) => void;
 }) {
@@ -2080,7 +2173,7 @@ function SkinWorkspace({
             </div>
             {selectedSkin?.item_id && <span className="level-chip">道具ID {selectedSkin.item_id}</span>}
           </div>
-          {selectedSkin ? <SkinDetail record={selectedSkin} onOpenSkin={onOpenSkin} /> : <EmptyState />}
+          {selectedSkin ? <SkinDetail record={selectedSkin} clientRootPath={clientRootPath} onOpenSkin={onOpenSkin} /> : <EmptyState />}
         </div>
 
         <div className="list-panel">
@@ -2105,7 +2198,8 @@ function SkinWorkspace({
   );
 }
 
-function SkinDetail({ record, onOpenSkin }: { record: SkinRecord; onOpenSkin: (reference: SkinReference) => void }) {
+function SkinDetail({ record, clientRootPath, onOpenSkin }: { record: SkinRecord; clientRootPath: string; onOpenSkin: (reference: SkinReference) => void }) {
+  const imageAssets = record.image_assets ?? [];
   return (
     <div className="detail-stack">
       <div className="level-overview">
@@ -2122,6 +2216,22 @@ function SkinDetail({ record, onOpenSkin }: { record: SkinRecord; onOpenSkin: (r
           <strong>{record.levels.length}</strong>
         </div>
       </div>
+      {imageAssets.length > 0 && (
+        <section className="monster-section">
+          <div className="monster-section-title">
+            <span>皮肤图片</span>
+            <strong>{imageAssets.length} 张</strong>
+          </div>
+          <div className="skin-image-list">
+            {imageAssets.map((image) => (
+              <figure className="skin-image-card" key={image.name}>
+                {clientRootPath.trim() ? <img src={clientImageUrl(clientRootPath, image.name)} alt={`${record.name}${image.label}`} loading="lazy" /> : <div className="skin-image-missing">未设置客户端资源根路径</div>}
+                <figcaption>{image.label} · {image.name}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </section>
+      )}
       {record.prerequisite_skins.length > 0 && (
         <section className="monster-section">
           <div className="monster-section-title">

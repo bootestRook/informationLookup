@@ -115,12 +115,18 @@ type SkinReference = {
   name: string;
 };
 
+type SkinImageAsset = {
+  label: string;
+  name: string;
+};
+
 type SkinRecord = {
   category: SkinCategoryKey;
   name: string;
   skin_id: number;
   item_id: number | null;
   skill_name: string;
+  image_assets: SkinImageAsset[];
   prerequisite_skins: SkinReference[];
   levels: SkinLevel[];
 };
@@ -154,6 +160,7 @@ type EntryLookupData = {
 
 type SavedSettings = {
   rootPath?: string;
+  clientRootPath?: string;
 };
 
 const REQUIRED_FILES: Array<{ key: RequiredFileKey; label: string; fileName: string }> = [
@@ -169,7 +176,7 @@ const REQUIRED_FILES: Array<{ key: RequiredFileKey; label: string; fileName: str
 
 const settingsPath = path.resolve(process.cwd(), ".local", "level-info-settings.json");
 const cachePath = path.resolve(process.cwd(), ".local", "level-info-cache.json");
-const cacheVersion = 3;
+const cacheVersion = 5;
 const tagPattern = /<[^>]+>/g;
 const partNameById = new Map<number, string>([
   [1, "头盔"],
@@ -235,21 +242,52 @@ export async function scanLevelLookup(rootPath: string): Promise<ScanResult> {
   return result;
 }
 
-export async function readSavedRootPath(): Promise<string> {
+export async function readSavedSettings(): Promise<SavedSettings> {
   try {
     const raw = await fs.readFile(settingsPath, "utf-8");
     const settings = JSON.parse(raw) as SavedSettings;
-    return typeof settings.rootPath === "string" ? settings.rootPath : "";
+    return {
+      rootPath: typeof settings.rootPath === "string" ? settings.rootPath : "",
+      clientRootPath: typeof settings.clientRootPath === "string" ? settings.clientRootPath : "",
+    };
   } catch {
-    return "";
+    return {};
   }
 }
 
-export async function saveSavedRootPath(rootPath: string): Promise<void> {
+export async function readSavedRootPath(): Promise<string> {
+  return (await readSavedSettings()).rootPath ?? "";
+}
+
+export async function saveSavedRootPath(rootPath: string, clientRootPath = ""): Promise<void> {
   const normalizedRoot = rootPath.trim().replace(/^"+|"+$/g, "");
   if (!normalizedRoot) return;
+  const normalizedClientRoot = clientRootPath.trim().replace(/^"+|"+$/g, "");
   await fs.mkdir(path.dirname(settingsPath), { recursive: true });
-  await fs.writeFile(settingsPath, `${JSON.stringify({ rootPath: normalizedRoot }, null, 2)}\n`, "utf-8");
+  await fs.writeFile(settingsPath, `${JSON.stringify({ rootPath: normalizedRoot, clientRootPath: normalizedClientRoot }, null, 2)}\n`, "utf-8");
+}
+
+export async function readClientImage(clientRootPath: string, resourceName: string): Promise<Buffer | null> {
+  const rootText = clientRootPath.trim().replace(/^"+|"+$/g, "");
+  const safeName = path.basename(resourceName.trim()).replace(/\.png$/i, "");
+  if (!rootText || !safeName) return null;
+
+  const root = path.resolve(rootText);
+  const stat = await fs.stat(root).catch(() => null);
+  if (!stat?.isDirectory()) return null;
+
+  const assetRoot = path.basename(root).toLowerCase() === "assets" ? root : path.join(root, "Assets");
+  const assetStat = await fs.stat(assetRoot).catch(() => null);
+  if (!assetStat?.isDirectory()) return null;
+
+  const subdirs = ["UIRaw/Icon_Skin", "UIRaw/Icon_HeXin", "UIRaw/Icon_Wall", "Resources/Textures/WallIcon", "UIRaw/Icon_Skill"];
+  for (const subdir of subdirs) {
+    const imagePath = path.resolve(assetRoot, subdir, `${safeName}.png`);
+    if (!imagePath.startsWith(assetRoot + path.sep)) continue;
+    const buffer = await fs.readFile(imagePath).catch(() => null);
+    if (buffer) return buffer;
+  }
+  return null;
 }
 
 async function readWorkbook(filePath: string): Promise<XLSX.WorkBook> {
@@ -294,6 +332,7 @@ async function readCachedScan(rootPath: string): Promise<CachedScanResult | null
     if (!Array.isArray(cached.files) || REQUIRED_FILES.some((file) => !cached.files.some((cachedFile) => cachedFile.key === file.key))) return null;
     if (!cached.skinLookup?.wall || !cached.skinLookup?.wallChroma) return null;
     if (cached.skinLookup.personChroma?.some((record) => typeof record.prerequisite_skins?.[0] === "string")) return null;
+    if (cached.skinLookup.person?.some((record) => !Array.isArray(record.image_assets))) return null;
     return cached;
   } catch {
     return null;
@@ -539,6 +578,26 @@ function textById(textMap: Map<number, string>, value: CellValue): string {
   return stripRichText(textMap.get(id) || `[文本表未找到:${id}]`);
 }
 
+function pushImageAsset(images: SkinImageAsset[], seen: Set<string>, label: string, value: CellValue) {
+  const name = toText(value);
+  if (!name || seen.has(name)) return;
+  seen.add(name);
+  images.push({ label, name });
+}
+
+function collectSkinImages(row: Record<string, CellValue>, category: SkinCategoryKey): SkinImageAsset[] {
+  const images: SkinImageAsset[] = [];
+  const seen = new Set<string>();
+  if (category === "wall" || category === "wallChroma") {
+    pushImageAsset(images, seen, "展示", row["展示图片"]);
+    pushImageAsset(images, seen, "图标", row["时装图标"]);
+    return images.slice(0, 2);
+  }
+  pushImageAsset(images, seen, "男", row["展示图标_男"] || row["时装图标"]);
+  pushImageAsset(images, seen, "女", row["展示图标_女"] || row["时装图标_女"]);
+  return images;
+}
+
 function buildEntryLookupData(entryWorkbook: XLSX.WorkBook, skillWorkbook: XLSX.WorkBook, textMap: Map<number, string>): EntryLookupData {
   const skillNameById = new Map<number, string>();
   for (const row of sheetObjects(skillWorkbook, "源素配置表")) {
@@ -702,6 +761,7 @@ function buildSkinLookupData(skinWorkbook: XLSX.WorkBook, skillWorkbook: XLSX.Wo
         skin_id: skinId,
         item_id: typeof itemId === "number" ? itemId : null,
         skill_name: typeof skillId === "number" ? skillNameById.get(skillId) || `[技能未找到:${skillId}]` : "",
+        image_assets: collectSkinImages(row, category.key),
         prerequisite_skins,
         levels,
       });
