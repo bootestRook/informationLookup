@@ -132,6 +132,7 @@ type EntryCondition = {
   target_id: number | string | null;
   count: number | string | null;
   text: string;
+  alternatives?: EntryCondition[];
 };
 
 type EntryRecord = {
@@ -168,7 +169,7 @@ const REQUIRED_FILES: Array<{ key: RequiredFileKey; label: string; fileName: str
 
 const settingsPath = path.resolve(process.cwd(), ".local", "level-info-settings.json");
 const cachePath = path.resolve(process.cwd(), ".local", "level-info-cache.json");
-const cacheVersion = 2;
+const cacheVersion = 3;
 const tagPattern = /<[^>]+>/g;
 const partNameById = new Map<number, string>([
   [1, "头盔"],
@@ -595,9 +596,9 @@ function buildEntryLookupData(entryWorkbook: XLSX.WorkBook, skillWorkbook: XLSX.
     else if (type === 11 && depth < 3) {
       const left = groupedConditions.get(String(target));
       const right = groupedConditions.get(String(count));
-      const leftText = left ? formatCondition(...left, depth + 1)?.text : String(target ?? "");
-      const rightText = right ? formatCondition(...right, depth + 1)?.text : String(count ?? "");
-      text = `OR(${leftText} / ${rightText})`;
+      const alternatives = [left ? formatCondition(...left, depth + 1) : null, right ? formatCondition(...right, depth + 1) : null].filter((condition): condition is EntryCondition => Boolean(condition));
+      text = `OR(${alternatives.map((condition) => condition.text).join(" / ") || `${target ?? ""}/${count ?? ""}`})`;
+      return { type, target_id: target, count, text, alternatives };
     } else if (type === 12) text = `局外解锁技能:${skillName(target)}`;
     else if (type === 13) text = `技能点数:${skillName(target)} >= ${count}`;
     else text = `类型${type}:(${target ?? ""}${count ? `,${count}` : ""})`;

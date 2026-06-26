@@ -123,6 +123,7 @@ type EntryCondition = {
   target_id: number | string | null;
   count: number | string | null;
   text: string;
+  alternatives?: EntryCondition[];
 };
 
 type EntryRecord = {
@@ -451,9 +452,9 @@ function buildEntryLookupData(entryWorkbook: XLSX.WorkBook, skillWorkbook: XLSX.
     else if (type === 11 && depth < 3) {
       const left = groupedConditions.get(String(target));
       const right = groupedConditions.get(String(count));
-      const leftText = left ? formatCondition(...left, depth + 1)?.text : String(target ?? "");
-      const rightText = right ? formatCondition(...right, depth + 1)?.text : String(count ?? "");
-      text = `OR(${leftText} / ${rightText})`;
+      const alternatives = [left ? formatCondition(...left, depth + 1) : null, right ? formatCondition(...right, depth + 1) : null].filter((condition): condition is EntryCondition => Boolean(condition));
+      text = `OR(${alternatives.map((condition) => condition.text).join(" / ") || `${target ?? ""}/${count ?? ""}`})`;
+      return { type, target_id: target, count, text, alternatives };
     } else if (type === 12) text = `局外解锁技能:${skillName(target)}`;
     else if (type === 13) text = `技能点数:${skillName(target)} >= ${count}`;
     else text = `类型${type}:(${target ?? ""}${count ? `,${count}` : ""})`;
@@ -1492,12 +1493,21 @@ function EntryDetail({ record, availableEntryIds, onOpenEntry }: { record: Entry
 }
 
 function conditionEntryId(condition: EntryCondition, availableEntryIds: Set<number>): number | null {
-  if (condition.type !== 2 || typeof condition.target_id !== "number") return null;
-  return availableEntryIds.has(condition.target_id) ? condition.target_id : null;
+  return conditionEntryIds(condition, availableEntryIds)[0] ?? null;
+}
+
+function conditionEntryIds(condition: EntryCondition, availableEntryIds: Set<number>): number[] {
+  if (condition.type === 2 && typeof condition.target_id === "number" && availableEntryIds.has(condition.target_id)) return [condition.target_id];
+  return condition.alternatives?.flatMap((alternative) => conditionEntryIds(alternative, availableEntryIds)) ?? [];
 }
 
 function EntrySkillGraph({ records, selectedEntryId, availableEntryIds, onOpenEntry }: { records: EntryRecord[]; selectedEntryId: number | null; availableEntryIds: Set<number>; onOpenEntry: (entryId: number) => void }) {
   const [selectedEdge, setSelectedEdge] = useState<{ from: number; to: number; type: "pre" | "conflict" } | null>(null);
+  const [nodePositions, setNodePositions] = useState<Record<number, { x: number; y: number }>>({});
+  const graphRef = useRef<HTMLElement | null>(null);
+  const dragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
+  const nodeDragRef = useRef<{ pointerId: number; entryId: number; x: number; y: number; startX: number; startY: number; moved: boolean } | null>(null);
+  const suppressCardClickRef = useRef<number | null>(null);
   const recordsById = new Map(records.map((record) => [record.entry_id, record]));
   const depthById = new Map<number, number>();
   const nodeWidth = 250;
@@ -1512,7 +1522,8 @@ function EntrySkillGraph({ records, selectedEntryId, availableEntryIds, onOpenEn
     if (stack.has(record.entry_id)) return 0;
     stack.add(record.entry_id);
     const prereqDepths = record.prerequisites
-      .map((condition) => (condition.type === 2 && typeof condition.target_id === "number" ? recordsById.get(condition.target_id) : null))
+      .flatMap((condition) => graphConditionEntryIds(condition))
+      .map((entryId) => recordsById.get(entryId) ?? null)
       .filter((prereq): prereq is EntryRecord => Boolean(prereq))
       .map((prereq) => depth(prereq, new Set(stack)) + 1);
     const value = Math.min(Math.max(0, ...prereqDepths), 5);
@@ -1538,25 +1549,46 @@ function EntrySkillGraph({ records, selectedEntryId, availableEntryIds, onOpenEn
     const columnHeight = columnRecords.length * nodeHeight + Math.max(0, columnRecords.length - 1) * rowGap;
     const columnOffset = column === 0 ? Math.max(0, (bodyHeight - columnHeight) / 2) : 0;
     columnRecords.forEach((record, rowIndex) => {
+      const savedPosition = nodePositions[record.entry_id];
       nodeById.set(record.entry_id, {
         record,
-        x: columnIndex * (nodeWidth + columnGap),
-        y: labelHeight + columnOffset + rowIndex * (nodeHeight + rowGap),
+        x: savedPosition?.x ?? columnIndex * (nodeWidth + columnGap),
+        y: savedPosition?.y ?? labelHeight + columnOffset + rowIndex * (nodeHeight + rowGap),
       });
     });
   }
 
-  const canvasWidth = Math.max(1, orderedColumns.length) * nodeWidth + Math.max(0, orderedColumns.length - 1) * columnGap;
+  const layoutWidth = Math.max(1, orderedColumns.length) * nodeWidth + Math.max(0, orderedColumns.length - 1) * columnGap;
+  const canvasWidth = layoutWidth + 520;
   const canvasHeight = labelHeight + bodyHeight;
+  const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+  function graphConditionEntryIds(condition: EntryCondition): number[] {
+    if (condition.type === 2 && typeof condition.target_id === "number" && recordsById.has(condition.target_id)) return [condition.target_id];
+    return condition.alternatives?.flatMap(graphConditionEntryIds) ?? [];
+  }
+
   const prerequisiteEdges = records.flatMap((record) =>
     record.prerequisites
-      .map((condition) => (condition.type === 2 && typeof condition.target_id === "number" ? { from: condition.target_id, to: record.entry_id } : null))
-      .filter((edge): edge is { from: number; to: number } => Boolean(edge && nodeById.has(edge.from) && nodeById.has(edge.to))),
+      .flatMap((condition) => graphConditionEntryIds(condition).map((entryId) => ({ from: entryId, to: record.entry_id })))
+      .filter((edge) => nodeById.has(edge.from) && nodeById.has(edge.to)),
+  );
+  const visualPrerequisiteEdges = records.flatMap((record) =>
+    record.prerequisites
+      .filter((condition) => !condition.alternatives?.length)
+      .flatMap((condition) => graphConditionEntryIds(condition).map((entryId) => ({ from: entryId, to: record.entry_id })))
+      .filter((edge) => nodeById.has(edge.from) && nodeById.has(edge.to)),
+  );
+  const orGroups = records.flatMap((record) =>
+    record.prerequisites
+      .filter((condition) => condition.alternatives?.length)
+      .map((condition) => ({ to: record.entry_id, froms: graphConditionEntryIds(condition).filter((entryId) => nodeById.has(entryId)) }))
+      .filter((group) => group.froms.length > 1 && nodeById.has(group.to)),
   );
   const conflictEdges = records.flatMap((record) =>
     record.conflicts
-      .map((condition) => (condition.type === 2 && typeof condition.target_id === "number" ? { from: condition.target_id, to: record.entry_id } : null))
-      .filter((edge): edge is { from: number; to: number } => Boolean(edge && nodeById.has(edge.from) && nodeById.has(edge.to))),
+      .flatMap((condition) => graphConditionEntryIds(condition).map((entryId) => ({ from: entryId, to: record.entry_id })))
+      .filter((edge) => nodeById.has(edge.from) && nodeById.has(edge.to)),
   );
   const allEdges = [...prerequisiteEdges, ...conflictEdges];
   const highlightedNodeIds = new Set<number>();
@@ -1572,8 +1604,90 @@ function EntrySkillGraph({ records, selectedEntryId, availableEntryIds, onOpenEn
     }
   }
 
+  function startGraphDrag(event: React.PointerEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(".entry-graph-card, .entry-condition-chip, .entry-edge, .entry-edge-hit, .entry-or-node, button")) return;
+    const graph = graphRef.current;
+    if (!graph) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      left: graph.scrollLeft,
+      top: graph.scrollTop,
+    };
+    graph.setPointerCapture(event.pointerId);
+    graph.classList.add("dragging");
+  }
+
+  function moveGraphDrag(event: React.PointerEvent<HTMLElement>) {
+    const drag = dragRef.current;
+    const graph = graphRef.current;
+    if (!drag || !graph || drag.pointerId !== event.pointerId) return;
+    graph.scrollLeft = drag.left - (event.clientX - drag.x);
+    graph.scrollTop = drag.top - (event.clientY - drag.y);
+  }
+
+  function endGraphDrag(event: React.PointerEvent<HTMLElement>) {
+    const drag = dragRef.current;
+    const graph = graphRef.current;
+    if (!drag || !graph || drag.pointerId !== event.pointerId) return;
+    if (graph.hasPointerCapture(event.pointerId)) graph.releasePointerCapture(event.pointerId);
+    graph.classList.remove("dragging");
+    dragRef.current = null;
+  }
+
+  function startNodeDrag(event: React.PointerEvent<HTMLDivElement>, entryId: number) {
+    if (event.button !== 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(".entry-condition-chip, button")) return;
+    const node = nodeById.get(entryId);
+    if (!node) return;
+    event.stopPropagation();
+    nodeDragRef.current = {
+      pointerId: event.pointerId,
+      entryId,
+      x: event.clientX,
+      y: event.clientY,
+      startX: node.x,
+      startY: node.y,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.classList.add("dragging");
+  }
+
+  function moveNodeDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = nodeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    const nextX = clamp(drag.startX + dx, 0, Math.max(0, canvasWidth - nodeWidth));
+    const nextY = clamp(drag.startY + dy, labelHeight, Math.max(labelHeight, canvasHeight - nodeHeight));
+    setNodePositions((positions) => ({ ...positions, [drag.entryId]: { x: nextX, y: nextY } }));
+  }
+
+  function endNodeDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = nodeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    event.currentTarget.classList.remove("dragging");
+    if (drag.moved) suppressCardClickRef.current = drag.entryId;
+    nodeDragRef.current = null;
+  }
+
   return (
-    <section className="entry-skill-graph" aria-label="技能词条整图">
+    <section
+      ref={graphRef}
+      className="entry-skill-graph"
+      aria-label="技能词条整图"
+      onPointerDown={startGraphDrag}
+      onPointerMove={moveGraphDrag}
+      onPointerUp={endGraphDrag}
+      onPointerCancel={endGraphDrag}
+    >
       <div className="entry-skill-canvas" style={{ width: canvasWidth, height: canvasHeight }}>
         <svg className="entry-graph-lines" width={canvasWidth} height={canvasHeight} viewBox={`0 0 ${canvasWidth} ${canvasHeight}`} aria-hidden="true">
           <defs>
@@ -1584,7 +1698,7 @@ function EntrySkillGraph({ records, selectedEntryId, availableEntryIds, onOpenEn
               <path d="M0,0 L8,4 L0,8 Z" />
             </marker>
           </defs>
-          {prerequisiteEdges.map((edge, index) => {
+          {visualPrerequisiteEdges.map((edge, index) => {
             const from = nodeById.get(edge.from)!;
             const to = nodeById.get(edge.to)!;
             const active = selectedEdge?.type === "pre" && selectedEdge.from === edge.from && selectedEdge.to === edge.to ? true : !selectedEdge && selectedEntryId !== null && (selectedEntryId === edge.from || selectedEntryId === edge.to);
@@ -1598,6 +1712,35 @@ function EntrySkillGraph({ records, selectedEntryId, availableEntryIds, onOpenEn
               <React.Fragment key={`pre-${index}-${edge.from}-${edge.to}`}>
                 <path className="entry-edge-hit" d={d} onClick={() => setSelectedEdge({ ...edge, type: "pre" })} />
                 <path className={active ? "entry-edge active selectable" : "entry-edge selectable"} d={d} markerEnd="url(#entry-arrow)" onClick={() => setSelectedEdge({ ...edge, type: "pre" })} />
+              </React.Fragment>
+            );
+          })}
+          {orGroups.map((group, groupIndex) => {
+            const to = nodeById.get(group.to)!;
+            const orX = to.x - Math.max(36, columnGap / 2);
+            const orY = to.y + nodeHeight / 2;
+            const active = !selectedEdge && selectedEntryId === group.to;
+            return (
+              <React.Fragment key={`or-${groupIndex}-${group.to}`}>
+                {group.froms.map((fromId) => {
+                  const from = nodeById.get(fromId)!;
+                  const startX = from.x + nodeWidth;
+                  const startY = from.y + nodeHeight / 2;
+                  const midX = startX + Math.max(24, (orX - startX) / 2);
+                  const d = `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${orY}, ${orX - 12} ${orY}`;
+                  return (
+                    <React.Fragment key={`or-in-${fromId}-${group.to}`}>
+                      <path className="entry-edge-hit" d={d} onClick={() => setSelectedEdge({ from: fromId, to: group.to, type: "pre" })} />
+                      <path className={active ? "entry-edge active selectable" : "entry-edge selectable"} d={d} onClick={() => setSelectedEdge({ from: fromId, to: group.to, type: "pre" })} />
+                    </React.Fragment>
+                  );
+                })}
+                <path
+                  className={active ? "entry-edge active selectable" : "entry-edge selectable"}
+                  d={`M ${orX + 12} ${orY} L ${to.x - 8} ${orY}`}
+                  markerEnd="url(#entry-arrow)"
+                  onClick={() => setSelectedEdge({ from: group.froms[0], to: group.to, type: "pre" })}
+                />
               </React.Fragment>
             );
           })}
@@ -1624,8 +1767,29 @@ function EntrySkillGraph({ records, selectedEntryId, availableEntryIds, onOpenEn
             {column === 0 ? "基础" : `第${column + 1}层`}
           </span>
         ))}
+        {orGroups.map((group, index) => {
+          const to = nodeById.get(group.to)!;
+          return (
+            <span key={`or-label-${index}-${group.to}`} className="entry-or-node" style={{ left: to.x - Math.max(36, columnGap / 2) - 12, top: to.y + nodeHeight / 2 - 12 }}>
+              或
+            </span>
+          );
+        })}
         {[...nodeById.values()].map(({ record, x, y }) => (
-          <div key={record.entry_id} className="entry-node-position" style={{ left: x, top: y, width: nodeWidth, height: nodeHeight }}>
+          <div
+            key={record.entry_id}
+            className="entry-node-position"
+            style={{ left: x, top: y, width: nodeWidth, height: nodeHeight }}
+            onPointerDown={(event) => startNodeDrag(event, record.entry_id)}
+            onPointerMove={moveNodeDrag}
+            onPointerUp={endNodeDrag}
+            onPointerCancel={endNodeDrag}
+            onClickCapture={(event) => {
+              if (suppressCardClickRef.current !== record.entry_id) return;
+              suppressCardClickRef.current = null;
+              event.stopPropagation();
+            }}
+          >
             <EntryGraphCard
               record={record}
               selected={record.entry_id === selectedEntryId}
@@ -1656,8 +1820,8 @@ function EntryGraphCard({
   availableEntryIds: Set<number>;
   onOpenEntry: (entryId: number) => void;
 }) {
-  const entryPrerequisites = record.prerequisites.filter((condition) => condition.type === 2);
-  const entryConflicts = record.conflicts.filter((condition) => condition.type === 2);
+  const entryPrerequisites = record.prerequisites.filter((condition) => conditionEntryIds(condition, availableEntryIds).length > 0);
+  const entryConflicts = record.conflicts.filter((condition) => conditionEntryIds(condition, availableEntryIds).length > 0);
   const className = selected ? "entry-graph-card selected" : edgeSelected ? "entry-graph-card edge-selected" : "entry-graph-card";
   return (
     <article
@@ -1689,22 +1853,41 @@ function EntryGraphCard({
 }
 
 function ConditionChip({ condition, availableEntryIds, onOpenEntry, tone = "normal" }: { condition: EntryCondition; availableEntryIds: Set<number>; onOpenEntry: (entryId: number) => void; tone?: "normal" | "conflict" }) {
-  const entryId = conditionEntryId(condition, availableEntryIds);
+  const entryIds = conditionEntryIds(condition, availableEntryIds);
   const className = tone === "conflict" ? "entry-condition-chip conflict" : "entry-condition-chip";
-  return entryId ? (
+  const labelPrefix = tone === "conflict" ? "互斥" : "前置";
+  return entryIds.length === 1 ? (
     <button
       type="button"
       className={className}
       onClick={(event) => {
         event.stopPropagation();
-        onOpenEntry(entryId);
+        onOpenEntry(entryIds[0]);
       }}
     >
-      {tone === "conflict" ? "互斥" : "前置"} {condition.target_id}
+      {labelPrefix} {entryIds[0]}
     </button>
+  ) : entryIds.length > 1 ? (
+    <span className={`${className} or-chip`} onClick={(event) => event.stopPropagation()}>
+      <span>{labelPrefix}</span>
+      {entryIds.map((entryId, index) => (
+        <React.Fragment key={entryId}>
+          {index > 0 && <em>或</em>}
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenEntry(entryId);
+            }}
+          >
+            {entryId}
+          </button>
+        </React.Fragment>
+      ))}
+    </span>
   ) : (
     <span className={className}>
-      {tone === "conflict" ? "互斥" : "前置"} {condition.target_id ?? "-"}
+      {labelPrefix} {condition.target_id ?? "-"}
     </span>
   );
 }
@@ -1719,7 +1902,8 @@ function ConditionSection({ title, conditions, availableEntryIds, onOpenEntry }:
       {conditions.length ? (
         <div className="skin-level-list">
           {conditions.map((condition, index) => {
-            const entryId = conditionEntryId(condition, availableEntryIds);
+            const entryIds = conditionEntryIds(condition, availableEntryIds);
+            const entryId = entryIds.length === 1 ? entryIds[0] : null;
             const content = (
               <>
                 <strong>{condition.text}</strong>
