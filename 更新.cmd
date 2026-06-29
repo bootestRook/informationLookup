@@ -21,22 +21,22 @@ where npm >nul 2>nul || (
 set has_remote=
 for /f "delims=" %%r in ('git remote') do set has_remote=1
 
+:retry
 if defined has_remote (
   echo Pulling latest code...
-  git pull --ff-only || goto fail
+  git pull --ff-only || goto retry_wait
 ) else (
   echo No git remote configured. Skipping pull.
 )
 
 echo Installing dependencies...
-call npm install || goto fail
+call npm install || goto retry_wait
 
 echo Done.
-pause
 exit /b 0
 
-:fail
+:retry_wait
 echo.
-echo [ERROR] Update failed.
-pause
-exit /b 1
+echo [ERROR] Update failed. Retrying in 5 seconds...
+timeout /t 5 /nobreak >nul
+goto retry
